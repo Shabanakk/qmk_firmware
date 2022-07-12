@@ -27,5 +27,15 @@
     "python.formatting.provider": "yapf",
     "[json]": {
 	    "editor.formatOnSave": false
-    }
+    },
+    "favorites.resources": [
+        {
+            "filePath": "keyboards\\cantor\\keymaps\\shaba",
+            "group": "Default"
+        },
+        {
+            "filePath": "keyboards\\splitkb\\kyria\\keymaps\\shaba",
+            "group": "Default"
+        }
+    ]
 }
