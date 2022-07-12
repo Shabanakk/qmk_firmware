@@ -34,6 +34,7 @@ quantum/version.h
 *.bin
 *.eep
 *.hex
+!*_shaba.hex
 *.qmk
 *.uf2
 
