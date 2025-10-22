@@ -1,6 +1,5 @@
 #include QMK_KEYBOARD_H
 #include "keymap_us_international.h"
-#include "features/achordion.h"
 
 // clang-format off
 
@@ -34,14 +33,19 @@ enum layers {
 #define GER_UE US_UDIA
 #define GER_SS US_SS
 
-// Mod-taps with non-basic keycodes, remapped via 'tap_overrides'.
-// See https://precondition.github.io/home-row-mods#using-non-basic-keycodes-in-mod-taps.
+// Mod-taps with non-basic keycodes such as C(KC_R), remapped via 'tap_overrides'.
+//
+// These are used on the navigation layer so that we can have, e.g., MT(MOD_LCTL, C(KC_R))
+// on the 'R' key for holding CTL in combination with the arrow keys and doing CTL+R when
+// pressed.
+//
 // The specific keycodes used for the tap actions (F20, F21, ...) are not important,
 // they just need to be distinct.
+//
+// See https://precondition.github.io/home-row-mods#using-non-basic-keycodes-in-mod-taps.
 #define LALT_CA MT(MOD_LALT, KC_F13) // --> MT(MOD_LALT, C(KC_A))
 #define LCTL_CR MT(MOD_LCTL, KC_F14) // --> MT(MOD_LCTL, C(KC_R))
 #define LSFT_CS MT(MOD_LSFT, KC_F15) // --> MT(MOD_LSFT, C(KC_S))
-#define RNAV_CT LT(_NAV, KC_F16)     // --> LT(_NAV,     C(KC_T))
 
 #define LALT_A MT(MOD_LALT, KC_A)
 #define LCTL_R MT(MOD_LCTL, KC_R)
@@ -59,26 +63,15 @@ enum layers {
 #define NAV_SPC LT(_NAV, KC_SPACE)
 #define SFT_TAB LT(_SFT_CTL, KC_TAB)
 
-#define INT_ENT LT(_INTL, KC_ENTER)
 #define SFT_BSP MT(MOD_LSFT, KC_BACKSPACE)
 #define FUN_DEL LT(_FUN, KC_DELETE)
 
-struct TapOverride {
-    uint16_t pressed_keycode;
-    uint16_t tap_keycode_override;
-};
-
-const struct TapOverride tap_overrides[] = {
-    {LALT_CA, C(KC_A)},
-    {LCTL_CR, C(KC_R)},
-    {LSFT_CS, C(KC_S)},
-    {RNAV_CT, C(KC_T)},
-};
-
+// Per-key tapping terms (enabled by TAPPING_TERM_PER_KEY)
 uint16_t get_tapping_term(uint16_t keycode, keyrecord_t *record) {
     switch (keycode) {
         // Pinky finger home row
         case LALT_A:
+            return 250;
         case LALT_O:
             return 300;
         // Middle finger home row
@@ -92,7 +85,7 @@ uint16_t get_tapping_term(uint16_t keycode, keyrecord_t *record) {
         case INTL_D:
             return 175;
         default:
-            return 200;
+            return TAPPING_TERM; // 200
     }
 }
 
@@ -107,37 +100,42 @@ bool get_hold_on_other_key_press(uint16_t keycode, keyrecord_t *record) {
     }
 }
 
+struct TapOverride {
+    uint16_t pressed_keycode;
+    uint16_t tap_keycode_override;
+};
+
+const struct TapOverride tap_overrides[] = {
+    {LALT_CA, C(KC_A)},
+    {LCTL_CR, C(KC_R)},
+    {LSFT_CS, C(KC_S)},
+};
+
 bool override_tap_with(uint16_t tap_keycode, keyrecord_t *record) {
     if (record->event.pressed && record->tap.count > 0) {
         tap_code16(tap_keycode);
-        return false;
+        return false; // key event handled
     }
-    return true;
+    return true; // key event NOT handled
 }
 
+// Entrypoint for custom handling of all key events.
+// If true is returned, QMK will process the keycodes as usual.
+// If false is returned, QMK will skip the normal key handling.
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
-#ifdef CONSOLE_ENABLE
-    uprintf("KL: kc: 0x%04X, col: %2u, row: %2u, pressed: %u, time: %5u, int: %u, count: %u\n", keycode, record->event.key.col, record->event.key.row, record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
-#endif
+    dprintf("KL: %s, pressed: %u, time: %5u, int: %u, count: %u\n", get_keycode_string(keycode), record->event.pressed, record->event.time, record->tap.interrupted, record->tap.count);
 
-    if (!process_achordion(keycode, record)) {
-        return false;
-    }
-
+    // Remap keycodes for mod-taps with non-basic keycodes
     for (int i = 0; i < sizeof(tap_overrides) / sizeof(tap_overrides[0]); ++i) {
         if (keycode == tap_overrides[i].pressed_keycode) {
             return override_tap_with(tap_overrides[i].tap_keycode_override, record);
         }
     }
 
-    return true;
+    return true; // key event NOT handled
 }
 
-void matrix_scan_user(void) {
-    achordion_task();
-}
-
-// Kyria
+// Kyria rev2
 // rows:               cols:
 // 000000     444444   765432     234567
 // 111111     555555   765432     234567
@@ -151,28 +149,20 @@ static bool on_right_alphas(keypos_t pos) {
     return 4 <= pos.row && pos.row <= 6;
 }
 
-// Revise selected tap-hold "hold" decisions to "tap".
-// Called while a tap-hold key is pressed down and some other key is pressed
-// after the tapping term and before achordion_timeout(). Usually this would
-// count as a "hold". But if this method returns false, the decision is revised
-// to "tap".
-bool achordion_chord(uint16_t tap_hold_keycode, keyrecord_t *tap_hold_record, uint16_t other_keycode, keyrecord_t *other_record) {
-    bool revise_hold_to_tap = false;
-
-    switch (tap_hold_keycode) {
-        case LALT_A:
-        case LCTL_R:
-        case LSFT_S:
-            revise_hold_to_tap = on_left_alphas(other_record->event.key);
-            break;
-        case RSFT_E:
-        case RCTL_I:
-        case LALT_O:
-            revise_hold_to_tap = on_right_alphas(other_record->event.key);
-            break;
+// Defines handedness for CHORDAL_HOLD by implementing
+// the following matrix:
+//   LLLLLL     RRRRRR
+//   LLLLLL     RRRRRR
+//   LLLLLL     RRRRRR
+//      ***** *****
+char chordal_hold_handedness(keypos_t key) {
+    if (on_left_alphas(key)) {
+        return 'L';
+    } else if (on_right_alphas(key)) {
+        return 'R';
+    } else {
+        return '*'; // Exempt the thumb keys
     }
-
-    return !revise_hold_to_tap;
 }
 
 // clang-format off
@@ -181,12 +171,12 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     [_COLEMAK_DH] = LAYOUT_shaba(
        KC_ENT,    KC_Q,    KC_W,    KC_F,    KC_P,    KC_B,         KC_J,    KC_L,    KC_U,    KC_Y, KC_SCLN, KC_UNDS,
       KC_MINS,  LALT_A,  LCTL_R,  LSFT_S,  RSYM_T,    KC_G,         KC_M,  LNUM_N,  RSFT_E,  RCTL_I,  LALT_O, KC_QUOT,
-      KC_LGUI,    KC_Z,    KC_X,    KC_C,  INTL_D,    KC_V,         KC_K,  INTL_H, KC_COMM,  KC_DOT, KC_SLSH, G(KC_L),
+      KC_LGUI,    KC_Z,    KC_X,    KC_C,  INTL_D,    KC_V,         KC_K,  INTL_H, KC_COMM,  KC_DOT, KC_SLSH, _______,
                KC_LEFT, KC_RGHT,  KC_ESC, NAV_SPC, SFT_TAB,       KC_ENT, SFT_BSP, FUN_DEL,   KC_UP, KC_DOWN
     ),
     [_FUN] = LAYOUT_shaba(
-QK_BOOTLOADER,  KC_F12,   KC_F7,   KC_F8,   KC_F9, KC_PSCR,      _______, _______, _______, _______, _______, _______,
-      KC_CAPS,  KC_F11,   KC_F4,   KC_F5,   KC_F6, KC_SCRL,      _______, KC_MPLY, KC_MPRV, KC_MNXT, _______, _______,
+      _______,  KC_F12,   KC_F7,   KC_F8,   KC_F9, KC_PSCR,      _______, _______, _______, _______, _______, QK_BOOTLOADER,
+      KC_CAPS,  KC_F11,   KC_F4,   KC_F5,   KC_F6, KC_SCRL,      _______, KC_MPLY, KC_MPRV, KC_MNXT, _______, DB_TOGG,
        KC_INS,  KC_F10,   KC_F1,   KC_F2,   KC_F3, KC_PAUS,      _______, KC_MUTE, KC_VOLD, KC_VOLU, _______, _______,
                _______, _______, _______, _______, _______,      _______, _______, _______, _______, _______
     ),
@@ -210,7 +200,7 @@ QK_BOOTLOADER,  KC_F12,   KC_F7,   KC_F8,   KC_F9, KC_PSCR,      _______, ______
     ),
     [_NAV] = LAYOUT_shaba(
       _______, C(KC_Q), C(KC_W), C(KC_F), C(KC_P), C(KC_B),      _______, KC_HOME,    KC_UP,  KC_END, _______, _______,
-      _______, LALT_CA, LCTL_CR, LSFT_CS, RNAV_CT,  KC_SPC,      _______, KC_LEFT,  KC_DOWN, KC_RGHT, _______, _______,
+      _______, LALT_CA, LCTL_CR, LSFT_CS, C(KC_T),  KC_SPC,      _______, KC_LEFT,  KC_DOWN, KC_RGHT, _______, _______,
       _______, C(KC_Z), C(KC_X), C(KC_C), C(KC_D), C(KC_V),      _______, _______,  KC_PGUP, KC_PGDN, _______, _______,
                _______, _______, _______, _______, _______,      _______, _______,  _______, _______, _______
     ),
